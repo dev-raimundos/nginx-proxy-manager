@@ -1,0 +1,154 @@
+version: '3'
+
+vars:
+  BACKUP_DIR: ./backups
+
+tasks:
+  default:
+    desc: Lista todas as tarefas disponíveis
+    silent: true
+    cmds:
+      - task --list
+
+  # ── Setup ──────────────────────────────────────────────────────────────────
+
+  setup:
+    desc: Primeiro uso — copia .env.example para .env
+    cmds:
+      - cp .env.example .env
+      - echo "Arquivo .env criado. Edite com suas credenciais antes de continuar."
+    status:
+      - test -f .env
+
+  env-check:
+    desc: Verifica se o .env existe e tem todas as variáveis obrigatórias
+    internal: true
+    cmds:
+      - |
+        test -f .env || (echo "ERRO: .env nao encontrado. Rode 'task setup'" && exit 1)
+      - |
+        grep -q "^DB_HOST=.\+" .env || (echo "ERRO: DB_HOST vazio ou ausente no .env" && exit 1)
+      - |
+        grep -q "^DB_USER=.\+" .env || (echo "ERRO: DB_USER vazio ou ausente no .env" && exit 1)
+      - |
+        grep -q "^DB_PASSWORD=.\+" .env || (echo "ERRO: DB_PASSWORD vazio ou ausente no .env" && exit 1)
+      - |
+        grep -q "^DB_NAME=.\+" .env || (echo "ERRO: DB_NAME vazio ou ausente no .env" && exit 1)
+
+  # ── Ciclo de vida ──────────────────────────────────────────────────────────
+
+  up:
+    desc: Sobe a stack em background
+    deps: [env-check]
+    cmds:
+      - docker compose up -d
+
+  down:
+    desc: Para e remove os containers (volumes preservados)
+    cmds:
+      - docker compose down
+
+  restart:
+    desc: Reinicia o container sem recriar
+    cmds:
+      - docker compose restart
+
+  stop:
+    desc: Para o container sem removê-lo
+    cmds:
+      - docker compose stop
+
+  start:
+    desc: Inicia um container parado sem recriar
+    cmds:
+      - docker compose start
+
+  # ── Atualização ────────────────────────────────────────────────────────────
+
+  pull:
+    desc: Baixa a versão mais recente da imagem
+    cmds:
+      - docker compose pull
+
+  update:
+    desc: Atualiza o NPM — baixa nova imagem e recria o container
+    cmds:
+      - task: down
+      - task: pull
+      - task: up
+
+  # ── Monitoramento ──────────────────────────────────────────────────────────
+
+  ps:
+    desc: Exibe status do container (saúde, portas, uptime)
+    cmds:
+      - docker compose ps
+
+  logs:
+    desc: Acompanha todos os logs em tempo real
+    cmds:
+      - docker compose logs -f
+
+  logs-since:
+    desc: "Exibe logs a partir de um intervalo. Uso: task logs-since -- 30m | 2h | 1d"
+    cmds:
+      - docker compose logs --since {{.CLI_ARGS}}
+
+  # ── Debug ──────────────────────────────────────────────────────────────────
+
+  shell:
+    desc: Abre um shell dentro do container do NPM
+    cmds:
+      - docker compose exec npm sh
+
+  env-dump:
+    desc: Exibe todas as variáveis de ambiente ativas dentro do container
+    cmds:
+      - docker compose exec npm env | sort
+
+  inspect:
+    desc: Exibe metadados completos do container em JSON
+    cmds:
+      - docker inspect nginx-proxy-manager
+
+  # ── Backup e restore ───────────────────────────────────────────────────────
+
+  backup:
+    desc: "Cria backup dos volumes em {{.BACKUP_DIR}}/ com timestamp"
+    vars:
+      TS:
+        sh: date +%Y%m%d-%H%M%S
+    cmds:
+      - mkdir -p {{.BACKUP_DIR}}
+      - tar -czf {{.BACKUP_DIR}}/npm-data-{{.TS}}.tar.gz data/
+      - tar -czf {{.BACKUP_DIR}}/letsencrypt-{{.TS}}.tar.gz letsencrypt/
+      - echo "Backup salvo com timestamp {{.TS}}"
+
+  backup-list:
+    desc: Lista backups existentes com tamanho
+    cmds:
+      - ls -lh {{.BACKUP_DIR}}/ 2>/dev/null || echo "Nenhum backup encontrado em {{.BACKUP_DIR}}/"
+
+  restore:
+    desc: "Restaura volumes de um backup. Uso: task restore DATA=backups/npm-data-X.tar.gz CERTS=backups/letsencrypt-X.tar.gz"
+    cmds:
+      - task: stop
+      - '[ -n "{{.DATA}}" ] && tar -xzf {{.DATA}} && echo "Dados restaurados de {{.DATA}}" || true'
+      - '[ -n "{{.CERTS}}" ] && tar -xzf {{.CERTS}} && echo "Certs restaurados de {{.CERTS}}" || true'
+      - task: start
+
+  # ── Limpeza ────────────────────────────────────────────────────────────────
+
+  clean:
+    desc: Remove containers e imagens locais nao utilizadas (volumes preservados)
+    cmds:
+      - docker compose down --rmi local
+      - docker image prune -f
+
+  clean-backups:
+    desc: "Remove backups com mais de N dias. Uso: task clean-backups DAYS=30"
+    vars:
+      DAYS: '{{.DAYS | default "30"}}'
+    cmds:
+      - find {{.BACKUP_DIR}}/ -name "*.tar.gz" -mtime +{{.DAYS}} -delete
+      - echo "Backups com mais de {{.DAYS}} dias removidos"

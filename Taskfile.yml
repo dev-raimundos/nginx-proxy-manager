@@ -54,14 +54,9 @@ tasks:
       - docker compose restart
 
   stop:
-    desc: Para o container sem removê-lo
+    desc: Para o container sem removê-lo (use 'task up' para retomar)
     cmds:
       - docker compose stop
-
-  start:
-    desc: Inicia um container parado sem recriar
-    cmds:
-      - docker compose start
 
   # ── Atualização ────────────────────────────────────────────────────────────
 
@@ -135,7 +130,7 @@ tasks:
       - task: stop
       - '[ -n "{{.DATA}}" ] && tar -xzf {{.DATA}} && echo "Dados restaurados de {{.DATA}}" || true'
       - '[ -n "{{.CERTS}}" ] && tar -xzf {{.CERTS}} && echo "Certs restaurados de {{.CERTS}}" || true'
-      - task: start
+      - task: up
 
   # ── Limpeza ────────────────────────────────────────────────────────────────
 
